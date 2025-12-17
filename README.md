@@ -1,65 +1,173 @@
-# IPFS Storage
+# IPFS-DAPP — мини “Google Drive” на IPFS + блокчейн
 
-This repository provides an implementation of DApp for use of IPFS with PNG images. It contains the following components: a smart contract that stores the CID of files for users, tests for it, a script for the deployment of the contract and a frontend.
+Учебный DApp-проект по блокчейну: веб-приложение для **загрузки изображений**, хранения их в **IPFS**, и ведения **истории файлов в смарт-контракте**. По логике и UX это похоже на **Google Drive**: есть “диск” (список файлов), просмотр, удаление/восстановление.
 
-## Overview
+> Важно: IPFS — контент-адресуемое хранилище. Если кто-то знает CID и контент доступен в сети, “удалить навсегда из интернета” невозможно гарантировать. В проекте реализовано удаление как в Google Drive: файл скрывается/помечается как удалённый в истории. При желании можно снять pin у себя локально (IPFS Desktop), чтобы файл перестал храниться на твоей ноде.
 
-Please note that you will need an Ethereum node to run (the frontend is focused on the local network), but you will not need to run an IPFS node yourself. All the details of working with IPFS are encapsulated.
+---
 
-## Frontend
+## Что делает приложение
 
-The frontend provides the following opportunities:
+### 1) Загрузка файла (Upload)
+1. Пользователь выбирает изображение в браузере.
+2. Файл отправляется в локальный IPFS-узел через **IPFS Desktop API**.
+3. IPFS возвращает **CID** (Content Identifier) — адрес контента.
+4. CID сохраняется в смарт-контракт (вместе с именем и временем загрузки) — так появляется “история” как на диске.
 
-1. You can upload a photo from your computer and upload it to IPFS using the "Upload" button;
-2. Using the "Download" button, you can download the last image saved in IPFS.
+### 2) Просмотр файла (View)
+- Приложение открывает файл через локальный IPFS Gateway:
+  - `http://127.0.0.1:8080/ipfs/<CID>`
+- Это похоже на то, как Drive показывает файл по ссылке, только источник — IPFS.
 
-## Quick start
+### 3) История / список файлов (My files)
+- В блокчейне хранится массив файлов пользователя:
+  - `cid` — IPFS адрес
+  - `name` — имя файла
+  - `createdAt` — время загрузки (timestamp)
+  - `deleted` — флаг “удалён” (soft delete)
+- UI отображает эту историю как “папку” на диске.
 
-To run this program, you first need to install the dependencies. This is done with the following command:
+### 4) Удаление и восстановление (Delete / Restore)
+- Delete помечает файл как удалённый (`deleted = true`).
+- Restore возвращает файл (`deleted = false`).
+- Это соответствует концепции корзины/скрытия в Drive.
 
+---
+
+## Почему использовался IPFS Desktop и зачем он нужен
+
+IPFS Desktop нужен, чтобы легко и стабильно получить локальную IPFS-ноду без ручной установки kubo/daemon:
+
+- Даёт **IPFS API** (RPC) для загрузки и управления пинами  
+  `http://127.0.0.1:5001`
+- Даёт **Gateway** для просмотра контента по CID  
+  `http://127.0.0.1:8080`
+- Позволяет управлять нодой и хранилищем через удобный UI.
+
+На фронтенде используется **kubo-rpc-client**, который подключается к IPFS Desktop API. Это удобнее и надёжнее для React/Webpack, чем `ipfs-core` в браузере (там часто возникают проблемы с node-модулями и полифилами).
+
+---
+
+## Архитектура
+
+- **IPFS** хранит сами файлы (контент) и выдаёт CID.
+- **Смарт-контракт** хранит историю CID и метаданные (не хранит изображения напрямую).
+- **Фронтенд**:
+  - загружает файл → получает CID → записывает в контракт
+  - читает историю из контракта → показывает список
+  - открывает файлы через gateway по CID
+
+---
+
+## Технологии
+
+- Solidity — смарт-контракт (история файлов)
+- Hardhat — локальная сеть + деплой
+- ethers.js — взаимодействие фронта с контрактом
+- React — UI
+- IPFS Desktop (Kubo) — локальная IPFS нода
+- kubo-rpc-client — загрузка в IPFS через API
+
+---
+
+## Что нужно для запуска
+
+### Требования
+- Node.js + npm
+- Git
+- IPFS Desktop (установлен и запущен)
+- Интернет (обычно нужен Hardhat, чтобы скачать компилятор solc при первом запуске)
+
+---
+
+## Запуск проекта (пошагово)
+
+### 0) Склонировать репозиторий
+```bash
+git clone https://github.com/DiPrincess/IPFS-DAPP.git
+cd IPFS-DAPP
 ```
-$ npm install
+
+### 1) Установить зависимости (корень проекта)
+```bash
+npm install
 ```
 
-Next, you will need to launch a local Ethereum node, into which the contract will be shared in the future. It is recommended to do this in a separate terminal:
+### 2) Установить и запустить IPFS Desktop
+1. Установи IPFS Desktop.
+2. Запусти его и убедись, что:
+   - API доступен на `127.0.0.1:5001`
+   - Gateway доступен на `127.0.0.1:8080`
 
+#### 2.1) Настроить CORS для IPFS API (обязательно для браузера)
+Чтобы фронтенд мог обращаться к `http://127.0.0.1:5001`, нужно настроить CORS в конфиге IPFS.
+
+**Windows путь (обычно):**  
+`C:\Users\<USER>\.ipfs\config`
+
+Добавить/проверить блок:
+
+```json
+"API": {
+  "HTTPHeaders": {
+    "Access-Control-Allow-Origin": [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ],
+    "Access-Control-Allow-Methods": ["PUT","POST","GET"],
+    "Access-Control-Allow-Headers": ["Authorization","Content-Type"],
+    "Access-Control-Expose-Headers": ["Location"],
+    "Access-Control-Allow-Credentials": ["true"]
+  }
+}
 ```
-$ npx hardhat node
+
+После правок необходимо **перезапустить IPFS Desktop**.
+
+---
+
+### 3) Запустить локальный блокчейн (Hardhat node)
+Открой отдельный терминал в корне проекта:
+
+```bash
+npx hardhat node
 ```
 
-You can deploy contracts using the deploy script.js, it also automatically fills in the frontend configuration files, so other ways to embed a smart contract are not recommended for use:
+Hardhat поднимет JSON-RPC на:
+- `http://127.0.0.1:8545`
 
+Этот терминал должен оставаться запущенным.
 
-```
-$ npx hardhat run scripts/deploy.js --network localhost
-Compiled 2 Solidity files successfully
-Deploying the contracts with the account: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-Storage's address: 0x5FbDB2315678afecb367f032d93F642f64180aa3
-```
+---
 
-The frontend is implemented on React, so you also need to install dependencies to run it. The frontend itself is started by the `start` command:
+### 4) Задеплоить смарт-контракт
+Открыть второй терминал (корень проекта) и выполнить:
 
-```
-$ cd frontend/
-$ npm install
-$ npm start
+```bash
+npx hardhat run scripts/deploy.js --network localhost
 ```
 
-## Tests
+Скрипт деплоя:
+- деплоит контракт Storage
+- обновляет во фронте:
+  - `frontend/src/contracts/Storage.json` (ABI)
+  - `frontend/src/contracts/contract-address.json` (адрес контракта)
 
-To run smart contract tests, use the following command:
+---
 
+### 5) Запустить фронтенд
+```bash
+cd frontend
+npm install
+npm start
 ```
-$ npx hardhat test
 
+Обычно приложение откроется на:
+- `http://localhost:3000`
 
-  Storage contract
-    ✔ Deployment (1342ms)
-    ✔ The user should not have files in the newly created contract
-    ✔ After sending the hash to the smart contract, it can be received when calling getter (44ms)
-    ✔ The contract should emit an event when registering a hash
+---
 
-
-  4 passing (1s)
-
-```
+## Лицензия
+Смотри файл `LICENSE`.
